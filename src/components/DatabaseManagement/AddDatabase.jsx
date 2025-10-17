@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { FiDatabase, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
 import { FaCircle } from 'react-icons/fa';
 import { toast } from 'react-toastify';
+// ghjfjhgjfdhgjkdfhgj
+
+// jgdfhgjhfdjghjfdg
+
+// gdfhgjjhdfjgjdfg
 
 const AddDatabase = ({ onClose, onAddDatabase }) => {
   const [formData, setFormData] = useState({
