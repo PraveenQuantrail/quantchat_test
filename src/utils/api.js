@@ -686,7 +686,7 @@ export const ChatWithSQL_API = async (usermessage, sessionID) => {
 
       let IsMessageLimit = usermessage.toLowerCase().includes('limit');
       let convertmessage = IsMessageLimit ? usermessage : `${usermessage} with limit 10`;
-    
+
 
       const response = await (await api_AI.post('/api/v1/sql/generate-sql', { session_id: sessionID, query: convertmessage })).data;
       if (response.success) {
@@ -696,13 +696,13 @@ export const ChatWithSQL_API = async (usermessage, sessionID) => {
 
         // backend api call for generating sql data's
         const sqldataFromQuery = await (await api_AI.post('/api/v1/database/execute-sql', { session_id: sessionID, sql_query: sqlQueryEncode })).data;
-
+        
 
         if (sqldataFromQuery.success) {
           return {
-            sucess: true,
+            success: true,
             sql: response?.generated_sql,
-            data: sqldataFromQuery.data
+            data: sqldataFromQuery.data ? sqldataFromQuery.data : []
           }
         }
 
@@ -722,23 +722,29 @@ export const ChatWithSQL_API = async (usermessage, sessionID) => {
   }
   catch (err) {
     console.log(err)
-    const errorValue = err?.response?.data;
+    const errorValue = err?.response?.data.detail;
 
     if (errorValue === 'Session not found') {
-      return { success: false, message: "Session not found or Session timeout" }
+      return { success: false, message: "SI" }
     }
-    return { success: false, message: "We have some problem to connect the fastapi" }
+    else if (errorValue === "Internal server error") {
+      return {success:false,message:"ISE"}
+    }
+    return { success: false, message: "We have some problem to connect the fastapi or Internal Server Error" }
   }
 }
 
 
-export const getSummarizeSQL_API = async (data,sessionID) => {
+export const getSummarizeSQL_API = async (data, sessionID) => {
   try {
-    const response = await (await api_AI.post(''))
+
+    const response = await (await api_AI.post('/api/v1/summarize',{ session_id: sessionID, data: data, user_question: "summarize the above data" })).data;
+
+    return {success:true,summary:response.summary}
   }
-  catch(err) {
+  catch (err) {
     console.log(err);
-    return {success:false,message:"Something went wrong in getting summarize"}
+    return { success: false, message: "Something went wrong in getting summarize" }
   }
 }
 

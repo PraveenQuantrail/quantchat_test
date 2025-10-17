@@ -13,10 +13,15 @@ import {
   FiPieChart,
 } from "react-icons/fi";
 import { FaCircle } from "react-icons/fa";
-import { databaseApi, authApi, ChatWithSQL_API } from "../../utils/api";
+import { databaseApi, authApi, ChatWithSQL_API, getSummarizeSQL_API } from "../../utils/api";
 import ViewSelectedDBInfo from "./ViewSelectedDBInfo";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Brain, Sparkles, BarChart3, PieChart as PieChartIcon } from 'lucide-react';
+import { LuServerOff } from "react-icons/lu";
+import { BiSolidMessageAltError } from "react-icons/bi";
+import { IoTimeOutline } from "react-icons/io5";
+
+
 
 const statusColors = {
   Connected: "text-green-500",
@@ -157,6 +162,9 @@ function getSessionID() {
   return sessionsdata;
 }
 
+const SelectChartStyle = () => `font-semibold text-[#4225b4] bg-gray-100 border-0 w-[90%] text-xs h-9 px-3 py-1 rounded-md outline-0 after:mr-5`
+
+
 // Loading animation component
 const LoadingDots = () => (
   <div className="flex space-x-1">
@@ -207,15 +215,11 @@ export default function Chat() {
   const [dbLoading, setDbLoading] = useState(true);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [checkingDbStatus, setCheckingDbStatus] = useState(false);
-  const [expandedSummaries, setExpandedSummaries] = useState({});
   const [showDBInfo, setShowDBInfo] = useState(false);
   const [selectedDbDetails, setSelectedDbDetails] = useState(null);
   const [schemaData, setSchemaData] = useState(null);
   const [showStatus, setShowStatus] = useState(false);
   const [isBotTyping, setIsBotTyping] = useState(false);
-  const [generatingSummary, setGeneratingSummary] = useState({});
-  const [generatingVisualization, setGeneratingVisualization] = useState({});
-  const [activeVisualizations, setActiveVisualizations] = useState({});
   const [hasShownWelcomeMessage, setHasShownWelcomeMessage] = useState(false);
 
 
@@ -227,6 +231,8 @@ export default function Chat() {
   // store the current database sessionid 
   const [currentSelectedID, setCurrentSelectedID] = useState("");
 
+  // visual chart details 
+  const [chartType, setChartType] = useState(["Bar Chart", "Pie Chart", "Histogram", "Scatter Plot"]);
 
 
 
@@ -239,10 +245,6 @@ export default function Chat() {
       }
     }
   }
-
-
-
-
 
   // On mount, restore selectedDb from localStorage/sessionStorage for this user
   useEffect(() => {
@@ -453,7 +455,7 @@ export default function Chat() {
       setIsBotTyping(true);
       const responseSQLBOT = await ChatWithSQL_API(userMsg, currentSelectedID);
       console.log(responseSQLBOT)
-      
+
       setIsBotTyping(false);
       return responseSQLBOT;
 
@@ -500,26 +502,40 @@ export default function Chat() {
 
     // bot response from fastapi
     const botapi_response = await chatBotResponse(userMessage, currentSelectedID);
+    const chatID = Date.now();
 
-    setChats(prev => [...prev, {
-      type: "bot",
-      text: "I understand you're looking for data insights. While I process your specific query, here's an example of what I can do with your data.",
-      sql: botapi_response.sql,
-      results: botapi_response.data,
-      chartData: botResponse.chartData
-    }]);
 
-    // setChats(prev => [...prev, {
-    //   type: "bot",
-    //   text: botResponse.text,
-    //   sql: botResponse.sql,
-    //   results: botResponse.results,
-    //   chartData: botResponse.chartData
-    // }]);
+   
+    if (botapi_response.success) {
+      const filterColumnsTable = botapi_response.data.length > 0 ? Object.keys(botapi_response.data[0]) : []
+      setChats(prev => [...prev, {
+        chatID,
+        summarize: { value: "", isloading: false },
+        type: "bot",
+        text: "I understand you're looking for data insights. While I process your specific query, here's an example of what I can do with your data.",
+        sql: botapi_response.sql,
+        results: botapi_response.data,
+        chartData: { isVisualForm: true, data: "", x_axis: "", y_axis: "", charttype: "", dataColumn: filterColumnsTable },
+        error: { status: false, message: "" }
+      }])
+    } else {
+      setChats(prev => [...prev, {
+        chatID,
+        summarize: { value: "", isloading: false },
+        type: "bot",
+        text: "",
+        sql: "",
+        results: "",
+        chartData: { isVisualForm: true, data: "", x_axis: "", y_axis: "", charttype: "", dataColumn: [] },
+        error: { status: true, message: botapi_response.message }
+      }])
+    }
+
+
+
+
+
   };
-
-
-
 
   const handleDbSelect = async (e) => {
     const dbId = e.target.value.toString();
@@ -567,62 +583,92 @@ export default function Chat() {
     setMessage("");
   };
 
-  const toggleSummary = async (index) => {
-    if (!expandedSummaries[index]) {
-      setGeneratingSummary(prev => ({ ...prev, [index]: true }));
-      // Simulate summary generation time
-      await new Promise(resolve => setTimeout(resolve, 800));
-      setGeneratingSummary(prev => ({ ...prev, [index]: false }));
+
+  // this convert the ** to space and return it
+  const convertNormalText = (summary) => {
+    return summary.includes("**") ? summary.replace(/\*\*/g, " ") : summary;
+  }
+
+  const GenerateSummarize = async (chat, sessionid) => {
+    if (chat.summarize.value) {
+      setChats(chats.map((val) => {
+        if (chat.chatID === val.chatID) {
+          return { ...chat, summarize: { value: "", isloading: false } }
+        }
+        return val
+      }));
     }
-    setExpandedSummaries(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
-  };
+    else {
+      setChats(chats.map((val) => {
+        if (chat.chatID === val.chatID) {
+          return { ...chat, summarize: { ...chat.summarize, isloading: true } };
+        }
+        return val
+      }));
 
-  const toggleVisualization = async (index) => {
-    if (!activeVisualizations[index]) {
-      setGeneratingVisualization(prev => ({ ...prev, [index]: true }));
-      // Simulate visualization generation time
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setGeneratingVisualization(prev => ({ ...prev, [index]: false }));
-    }
-    setActiveVisualizations(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
-  };
 
-  const generateSummary = (chat) => {
-    if (!chat.results) return "";
+      const respback = await getSummarizeSQL_API(chat.results, sessionid);
+      if (respback.success) {
 
-    const headers = chat.results.headers;
-    const rows = chat.results.rows;
 
-    if (headers.includes("Revenue") || headers.some(h => h.toLowerCase().includes("revenue"))) {
-      const revenueIndex = headers.findIndex(h =>
-        h.toLowerCase().includes("revenue") || h.toLowerCase().includes("amount")
-      );
 
-      if (revenueIndex !== -1) {
-        const total = rows.reduce((sum, row) => {
-          const value = parseFloat(row[revenueIndex].replace(/[^0-9.]/g, ''));
-          return sum + (isNaN(value) ? 0 : value);
-        }, 0);
 
-        const maxRow = rows.reduce((max, row) => {
-          const value = parseFloat(row[revenueIndex].replace(/[^0-9.]/g, ''));
-          return value > max.value ? { value, row } : max;
-        }, { value: -Infinity, row: null });
-
-        return `The data shows a total revenue of $${total.toLocaleString()}. 
-        The highest revenue was generated by ${maxRow.row ? maxRow.row[0] : 'N/A'} with $${maxRow.value.toLocaleString()}.`;
+        setChats(chats.map((val) => {
+          if (chat.chatID === val.chatID) {
+            return {
+              ...chat,
+              summarize:
+              {
+                value: convertNormalText(respback.summary),
+                isloading: false
+              }
+            };
+          }
+          return val
+        }));
       }
     }
 
-    return `This dataset contains ${rows.length} records with ${headers.length} fields. 
-    The data provides insights into ${headers.join(", ")} with comprehensive metrics for analysis.`;
-  };
+  }
+
+
+  const SelectAxishandler = (event,type,chatid) => {
+    if (type === 'x') {
+      setChats(chats.map(val => {
+        if (val.chatID === chatid) {
+          return {...val,chartData:{...val.chartData,x_axis:event.target.value}}
+        }
+        return val
+      }))
+    }else {
+      setChats(chats.map(val => {
+        if (val.chatID === chatid) {
+          return {...val,chartData:{...val.chartData,y_axis:event.target.value}}
+        }
+        return val
+      }))
+    }
+  }
+
+
+  const SelectChartType = (event,chatid) => {
+    setChats(chats.map(val => {
+      if (val.chatID === chatid) {
+        return {...val,chartData:{...val.chartData,charttype:event.target.value}}
+      }
+      return val;
+    }))
+  }
+
+
+  const OpenChartFormhandle = (chatid) => {
+    setChats(chats.map((val) => {
+      if (val.type === 'bot' && val.chatID === chatid) {
+        return { ...val, chartData: { ...val.chartData, isVisualForm: !val.chartData.isVisualForm } };
+      }
+      return val;
+    }))
+  }
 
   const renderChart = (chat, index) => {
     if (!chat.chartData) return null;
@@ -768,12 +814,39 @@ export default function Chat() {
               <span className="text-xs text-[#5D3FD3] font-medium">QuantChat</span>
             </div>
 
-            {chat.text && <div className="mb-3 text-gray-700">{chat.text}</div>}
+
+            {/* chat text and error handling container */}
+
+            {chat.text ?
+              <div className="mb-3 text-gray-700">{chat.text}</div> :
+
+              chat.error.status && <div>
+
+                {/* error for internal server error */}
+                {chat.error.message === 'ISE' && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <LuServerOff className="w-5 h-5 mr-2" /> The server encountered an internal error or misconfiguration and was unable to complete your request
+                </div>}
+
+
+                {/* error for Session Timeout */}
+                {chat.error.message === 'SI' && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <IoTimeOutline className="w-5 h-5 mr-2" /> Your session has expired. Please connect again
+                </div>}
+
+                {/* error for general things */}
+                {(chat.error.message !== 'SI' && chat.error.message !== 'ISE') && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <BiSolidMessageAltError className="w-5 h-5 mr-2" /> Something went wrong on our end. Please try again later.
+                </div>}
+
+
+              </div>
+
+            }
 
             {chat.sql && (
               <div className="mb-4">
                 <div className="flex items-center justify-between bg-gray-800 text-gray-100 px-3 py-2 rounded-t-md">
-                  <span className="text-xs font-medium">SQLmessage:"We have some problem to connect the fastapi"</span>
+                  <span className="text-xs font-medium">SQLmessage</span>
                   <button
                     onClick={() => copyToClipboard(chat.sql, `sql-${index}`)}
                     className="text-gray-300 hover:text-white transition-colors flex items-center"
@@ -839,11 +912,11 @@ export default function Chat() {
                 {/* Action Buttons */}
                 <div className="flex space-x-3 mt-4">
                   <button
-                    onClick={() => toggleSummary(index)}
-                    disabled={generatingSummary[index]}
+                    onClick={() => GenerateSummarize(chat, currentSelectedID)}
+                    // disabled={generatingSummary[index]}
                     className="flex items-center text-xs text-[#5D3FD3] hover:text-[#6d4fe4] font-medium transition-colors disabled:opacity-50"
                   >
-                    {generatingSummary[index] ? (
+                    {chat.summarize.isloading ? (
                       <>
                         <Sparkles className="mr-1 animate-pulse" size={12} />
                         Generating...
@@ -851,33 +924,28 @@ export default function Chat() {
                     ) : (
                       <>
                         <FiBarChart2 className="mr-1" size={12} />
-                        {expandedSummaries[index] ? 'Hide Summary' : 'Generate Summary'}
+                        {chat.summarize.value ? 'Hide Summary' : 'Generate Summary'}
                       </>
                     )}
                   </button>
 
                   <button
-                    onClick={() => toggleVisualization(index)}
-                    disabled={generatingVisualization[index]}
+                    onClick={() => OpenChartFormhandle(chat.chatID)}
+                    // disabled={generatingVisualization[index]}
                     className="flex items-center text-xs text-[#5D3FD3] hover:text-[#6d4fe4] font-medium transition-colors disabled:opacity-50"
                   >
-                    {generatingVisualization[index] ? (
-                      <>
-                        <BarChart3 className="mr-1 animate-pulse" size={12} />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <FiPieChart className="mr-1" size={12} />
-                        {activeVisualizations[index] ? 'Hide Visualization' : 'Visualize Data'}
-                      </>
-                    )}
+
+                    <>
+                      <FiPieChart className="mr-1" size={12} />
+                      {chat.chartData.isVisualForm ? 'Hide Visualization Form' : 'Visualize Data Form'}
+                    </>
+
                   </button>
                 </div>
 
                 {/* Summary Content */}
                 <AnimatePresence>
-                  {expandedSummaries[index] && (
+                  {chat.summarize.value !== "" && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -890,7 +958,7 @@ export default function Chat() {
                           <Sparkles className="mr-1" size={14} />
                           Data Summary
                         </div>
-                        {generateSummary(chat)}
+                        {chat.summarize.value}
                       </div>
                     </motion.div>
                   )}
@@ -898,7 +966,7 @@ export default function Chat() {
 
                 {/* Visualization Content */}
                 <AnimatePresence>
-                  {activeVisualizations[index] && (
+                  {chat.chartData.isVisualForm && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -906,12 +974,83 @@ export default function Chat() {
                       transition={{ duration: 0.3 }}
                       className="mt-3 overflow-hidden"
                     >
-                      <div className="bg-green-50 border border-green-100 rounded-md p-3">
+                      <div className="bg-gray-50 border border-gray-100 w-full rounded-md p-3">
                         <div className="font-medium text-green-700 mb-2 flex items-center">
                           <PieChartIcon className="mr-1" size={14} />
-                          Data Visualization
+                          Data Visualization From
                         </div>
-                        {renderChart(chat, index)}
+                        <div className="data-visual-edit-form my-3 w-full">
+                          
+                          <div className="chart-config-select-con w-full flex items-center justify-evenly">
+
+                            {/* chart type select container */}
+                            <div className="select-charttype w-[30%]">
+                              <select className={SelectChartStyle()} >
+                                <option selected value={""} disabled>Select The ChartType</option>
+                                {
+                                  chartType.map((opt) => {
+                                    return (
+                                      <option className="border-0 font-semibold" key={opt} value={opt}>
+                                        {opt}
+                                      </option>
+                                    )
+                                  })
+                                }
+                              </select>
+                            </div>
+
+                            {/* select option for x_axis */}
+                            <div className="x_aixs-con w-[30%]">
+                              {(chat.chartData.charttype !== "Pie Chart" || chat.chartData.chartType === "")
+                                &&
+                                <select className={SelectChartStyle()} onChange={(e) =>SelectAxishandler(e,'x',chat.chatID)}>
+                                  <option selected disabled value={""}>Select X_axis</option>
+                                  {
+                                    chat.chartData.dataColumn.map((opt) => {
+
+                                      return chat.chartData.y_axis === opt ?
+                                        <option disabled value={opt}>{opt}</option>
+                                        :
+                                        <option value={opt}>{opt}</option>
+
+
+
+                                    })
+                                  }
+                                </select>}
+                            </div>
+
+
+                            {/* select option for y_axis */}
+                            <div className="y_aixs-con w-[30%]">
+                              {(chat.chartData.charttype !== "Pie Chart" || chat.chartData.chartType === "")
+                                &&
+                                <select className={SelectChartStyle()} onChange={(e) =>SelectAxishandler(e,'y',chat.chatID)}>
+                                  <option selected disabled value={""}>Select Y_axis</option>
+                                  {
+                                    chat.chartData.dataColumn.map((opt) => {
+
+                                      return chat.chartData.x_axis === opt ?
+                                        <option disabled value={opt}>{opt}</option>
+                                        :
+                                        <option value={opt}>{opt}</option>
+
+
+
+                                    })
+                                  }
+                                </select>}
+                            </div>
+
+                          </div>
+
+                          <div className="input-con w-[95%] my-3 mx-auto  flex flex-row items-center ">
+                              
+                                <input className="w-[80%] bg-white h-9 rounded-md font-medium text-xs mr-2 outline-0 border-1 border-gray-300 pl-2" placeholder="Enter the query to describe the chart" />
+                                <button className="get-chart-btn w-[15%] bg-[#3c1eb3] h-9 text-xs font-semibold rounded-md text-white ">Get Chart</button>
+                          </div>
+
+                        </div>
                       </div>
                     </motion.div>
                   )}
