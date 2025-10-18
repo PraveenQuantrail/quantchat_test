@@ -749,6 +749,19 @@ export const getSummarizeSQL_API = async (data, sessionID) => {
 }
 
 
+export const GetVisualizationSQL_API = async (visualDet) => {
+  try {
+    const response = await (await api_AI.post('/api/v1/visualize/visualize',{...visualDet})).data;
+
+    return {success:true,imageURI:response.chart_image_base64}
+  }
+  catch(err) {
+    console.log(err)
+    return {success:false,message:"ISE"}
+  }
+}
+
+
 
 
 

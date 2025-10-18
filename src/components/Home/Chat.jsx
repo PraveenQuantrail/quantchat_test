@@ -13,13 +13,14 @@ import {
   FiPieChart,
 } from "react-icons/fi";
 import { FaCircle } from "react-icons/fa";
-import { databaseApi, authApi, ChatWithSQL_API, getSummarizeSQL_API } from "../../utils/api";
+import { databaseApi, authApi, ChatWithSQL_API, getSummarizeSQL_API, GetVisualizationSQL_API } from "../../utils/api";
 import ViewSelectedDBInfo from "./ViewSelectedDBInfo";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Brain, Sparkles, BarChart3, PieChart as PieChartIcon } from 'lucide-react';
 import { LuServerOff } from "react-icons/lu";
 import { BiSolidMessageAltError } from "react-icons/bi";
 import { IoTimeOutline } from "react-icons/io5";
+import { toast } from "react-toastify";
 
 
 
@@ -505,7 +506,7 @@ export default function Chat() {
     const chatID = Date.now();
 
 
-   
+
     if (botapi_response.success) {
       const filterColumnsTable = botapi_response.data.length > 0 ? Object.keys(botapi_response.data[0]) : []
       setChats(prev => [...prev, {
@@ -515,7 +516,7 @@ export default function Chat() {
         text: "I understand you're looking for data insights. While I process your specific query, here's an example of what I can do with your data.",
         sql: botapi_response.sql,
         results: botapi_response.data,
-        chartData: { isVisualForm: true, data: "", x_axis: "", y_axis: "", charttype: "", dataColumn: filterColumnsTable },
+        chartData: { isloading: false, image: "", isVisualForm: true, question: "", x_axis: "", y_axis: "", charttype: "", dataColumn: filterColumnsTable },
         error: { status: false, message: "" }
       }])
     } else {
@@ -526,7 +527,7 @@ export default function Chat() {
         text: "",
         sql: "",
         results: "",
-        chartData: { isVisualForm: true, data: "", x_axis: "", y_axis: "", charttype: "", dataColumn: [] },
+        chartData: { isloading: false, image: "", isVisualForm: true, question: "", x_axis: "", y_axis: "", charttype: "", dataColumn: [] },
         error: { status: true, message: botapi_response.message }
       }])
     }
@@ -632,18 +633,18 @@ export default function Chat() {
   }
 
 
-  const SelectAxishandler = (event,type,chatid) => {
+  const SelectAxishandler = (event, type, chatid) => {
     if (type === 'x') {
       setChats(chats.map(val => {
         if (val.chatID === chatid) {
-          return {...val,chartData:{...val.chartData,x_axis:event.target.value}}
+          return { ...val, chartData: { ...val.chartData, x_axis: event.target.value } }
         }
         return val
       }))
-    }else {
+    } else {
       setChats(chats.map(val => {
         if (val.chatID === chatid) {
-          return {...val,chartData:{...val.chartData,y_axis:event.target.value}}
+          return { ...val, chartData: { ...val.chartData, y_axis: event.target.value } }
         }
         return val
       }))
@@ -651,10 +652,10 @@ export default function Chat() {
   }
 
 
-  const SelectChartType = (event,chatid) => {
+  const SelectChartType = (event, chatid) => {
     setChats(chats.map(val => {
       if (val.chatID === chatid) {
-        return {...val,chartData:{...val.chartData,charttype:event.target.value}}
+        return { ...val, chartData: { ...val.chartData, charttype: event.target.value } }
       }
       return val;
     }))
@@ -668,6 +669,72 @@ export default function Chat() {
       }
       return val;
     }))
+  }
+
+  const ChartQuestionQuery = (chatid, event) => {
+    setChats(chats.map((val) => {
+      if (val.chatID === chatid) {
+        return { ...val, chartData: { ...val.chartData, question: event.target.value } }
+      }
+      return val;
+    }))
+  }
+
+  const SetPendingVisual = (chatid) => {
+    setChats(chats.map(val => {
+      if (val.chatID === chatid) {
+        return { ...val, chartData: { ...val.chartData, isloading: !val.chartData.isloading } }
+      }
+      return val;
+    }))
+  }
+
+
+  const SubmitVisualFormhandler = async (chatid) => {
+    try {
+
+      const findchat = chats.find((val) => val.chatID === chatid);
+      const chatdata = findchat?.chartData
+
+
+
+      if (true) {
+        const resdata = {
+          "session_id": currentSelectedID,
+          "data": findchat?.results,
+          "user_question": chatdata.question,
+          "chart_type": chatdata.charttype,
+          "x_axis": chatdata.x_axis,
+          "y_axis": chatdata.y_axis
+        }
+        SetPendingVisual(chatid)
+        const responseback = await GetVisualizationSQL_API(resdata);
+        if (responseback.success) {
+          const imageURI = `data:image/png;base64,${responseback.imageURI}`;
+          setChats(chats.map(val => {
+            if (val.chatID === chatid) {
+              return {...val,chartData:{...val.chartData,image:imageURI}};
+            }
+            return val;
+          }))
+          SetPendingVisual(chatid)
+        } else {
+          SetPendingVisual(chatid)
+        }
+
+      }
+      else {
+        console.log("Field is missing!")
+      }
+
+    }
+    catch (err) {
+      console.log(err.message)
+    }
+  }
+
+  const ErrorStyleChat = (errorFlag) => {
+    return errorFlag ? 'bg-red-50 border border-red-100' : ' bg-gray-50 border border-gray-100'
   }
 
   const renderChart = (chat, index) => {
@@ -805,7 +872,7 @@ export default function Chat() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: "easeOut" }}
-            className="max-w-3xl px-4 py-3 rounded-lg shadow-sm text-sm bg-gray-50 border border-gray-100 rounded-bl-none"
+            className={`max-w-3xl px-4 py-3 rounded-lg shadow-sm text-sm rounded-bl-none ${ErrorStyleChat(chat?.error?.status)}`}
           >
             <div className="flex items-center mb-2">
               <div className="bg-[#5D3FD3] p-1 rounded-full mr-2">
@@ -980,12 +1047,12 @@ export default function Chat() {
                           Data Visualization From
                         </div>
                         <div className="data-visual-edit-form my-3 w-full">
-                          
+
                           <div className="chart-config-select-con w-full flex items-center justify-evenly">
 
                             {/* chart type select container */}
                             <div className="select-charttype w-[30%]">
-                              <select className={SelectChartStyle()} >
+                              <select className={SelectChartStyle()} onChange={(e) => SelectChartType(e, chat.chatID)} >
                                 <option selected value={""} disabled>Select The ChartType</option>
                                 {
                                   chartType.map((opt) => {
@@ -1003,7 +1070,7 @@ export default function Chat() {
                             <div className="x_aixs-con w-[30%]">
                               {(chat.chartData.charttype !== "Pie Chart" || chat.chartData.chartType === "")
                                 &&
-                                <select className={SelectChartStyle()} onChange={(e) =>SelectAxishandler(e,'x',chat.chatID)}>
+                                <select className={SelectChartStyle()} onChange={(e) => SelectAxishandler(e, 'x', chat.chatID)}>
                                   <option selected disabled value={""}>Select X_axis</option>
                                   {
                                     chat.chartData.dataColumn.map((opt) => {
@@ -1025,7 +1092,7 @@ export default function Chat() {
                             <div className="y_aixs-con w-[30%]">
                               {(chat.chartData.charttype !== "Pie Chart" || chat.chartData.chartType === "")
                                 &&
-                                <select className={SelectChartStyle()} onChange={(e) =>SelectAxishandler(e,'y',chat.chatID)}>
+                                <select className={SelectChartStyle()} onChange={(e) => SelectAxishandler(e, 'y', chat.chatID)}>
                                   <option selected disabled value={""}>Select Y_axis</option>
                                   {
                                     chat.chartData.dataColumn.map((opt) => {
@@ -1045,10 +1112,21 @@ export default function Chat() {
                           </div>
 
                           <div className="input-con w-[95%] my-3 mx-auto  flex flex-row items-center ">
-                              
-                                <input className="w-[80%] bg-white h-9 rounded-md font-medium text-xs mr-2 outline-0 border-1 border-gray-300 pl-2" placeholder="Enter the query to describe the chart" />
-                                <button className="get-chart-btn w-[15%] bg-[#3c1eb3] h-9 text-xs font-semibold rounded-md text-white ">Get Chart</button>
+
+                            <input
+                              value={chat?.chartData?.question}
+                              onChange={(e) => ChartQuestionQuery(chat.chatID, e)}
+                              className="w-[80%] bg-white h-9 rounded-md font-medium text-xs mr-2 outline-0 border-3 border-gray-600 pl-2" placeholder="Enter the query to describe the chart" />
+                            <button
+                              onClick={() => SubmitVisualFormhandler(chat.chatID)}
+                              className="get-chart-btn w-[15%] bg-[#3c1eb3] h-9 text-xs font-semibold rounded-md text-white ">
+                              {chat.chartData.isloading ? 'Generating...' : 'Get Chart'}
+                            </button>
                           </div>
+
+                          {chat.chartData.image !== "" && <div>
+                            <image src={chat.chartData.image} />
+                          </div>}
 
                         </div>
                       </div>

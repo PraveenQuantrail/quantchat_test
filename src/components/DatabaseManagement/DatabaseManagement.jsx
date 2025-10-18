@@ -9,6 +9,8 @@ import AddDatabase from './AddDatabase';
 import EditDatabase from './EditDatabase';
 import ShowDatabase from './ShowDatabase';
 import { connectDBPinggy, databaseApi } from '../../utils/api';
+import { MdKey } from "react-icons/md";
+
 
 const statusStyles = {
   'Connected': 'text-green-500',
@@ -452,6 +454,14 @@ export default function DatabaseManagement() {
                         title="Delete"
                       >
                         <FaTrash />
+                      </button>
+
+                      <button
+                        // onClick={() => handleDelete(conn.id)}
+                        className="hover:text-purple-800 transition text-[#5d3fd3]"
+                        title="Generate Session key"
+                      >
+                        <MdKey className='w-5 h-5'/>
                       </button>
                     </div>
                   </td>
