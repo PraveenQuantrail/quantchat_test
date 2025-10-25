@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useContext } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FiSend,
@@ -11,12 +11,31 @@ import {
   FiRefreshCw,
   FiBarChart2,
   FiPieChart,
+  FiX,
+  FiZoomIn,
+  FiDownload,
+  FiRotateCw,
+  FiGrid,
+  FiChevronLeft,
+  FiChevronRight,
+  FiMaximize,
+  FiMinimize,
+  FiMic,
+  FiMicOff,
 } from "react-icons/fi";
 import { FaCircle } from "react-icons/fa";
-import { databaseApi, authApi, ChatWithSQL_API } from "../../utils/api";
+import { databaseApi, authApi, ChatWithSQL_API, getSummarizeSQL_API, GetVisualizationSQL_API } from "../../utils/api";
 import ViewSelectedDBInfo from "./ViewSelectedDBInfo";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Brain, Sparkles, BarChart3, PieChart as PieChartIcon } from 'lucide-react';
+import { LuServerOff } from "react-icons/lu";
+import { BiSolidMessageAltError } from "react-icons/bi";
+import { IoTimeOutline } from "react-icons/io5";
+import { AiOutlineLoading3Quarters } from "react-icons/ai";
+import { LazyLoadImage } from "react-lazy-load-image-component";
+import { PiLockKeyFill } from "react-icons/pi";
+import { SessionIDContext } from "../../context/SessionIDContext";
+import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 const statusColors = {
   Connected: "text-green-500",
@@ -50,97 +69,6 @@ const containerVariants = {
   }
 };
 
-// Predefined responses for demo
-const PREDEFINED_RESPONSES = {
-  "c": {
-    text: "I'll help you find the top 10 customers by revenue for this year.",
-    sql: "SELECT customer_name, SUM(order_total) as revenue\nFROM orders o\nJOIN customers c ON o.customer_id = c.id\nWHERE YEAR(order_date) = 2025\nGROUP BY customer_id, customer_name\nORDER BY revenue DESC\nLIMIT 10;",
-    results: {
-      headers: ["Customer Name", "Revenue"],
-      rows: [
-        ["Acme Corp", "$125,450"],
-        ["Globex", "$98,760"],
-        ["Wayne Enterprises", "$87,340"],
-        ["Stark Industries", "$76,540"],
-        ["Umbrella Corp", "$65,430"],
-        ["Oscorp", "$54,320"],
-        ["Wonka Industries", "$43,210"],
-        ["Cyberdyne Systems", "$32,100"],
-        ["Tyrell Corp", "$28,970"],
-        ["Spacely Sprockets", "$24,860"],
-      ],
-    },
-    chartData: [
-      { name: 'Acme Corp', revenue: 125450 },
-      { name: 'Globex', revenue: 98760 },
-      { name: 'Wayne Ent.', revenue: 87340 },
-      { name: 'Stark Ind.', revenue: 76540 },
-      { name: 'Umbrella Corp', revenue: 65430 },
-      { name: 'Oscorp', revenue: 54320 },
-      { name: 'Wonka Ind.', revenue: 43210 },
-      { name: 'Cyberdyne', revenue: 32100 },
-      { name: 'Tyrell Corp', revenue: 28970 },
-      { name: 'Spacely', revenue: 24860 },
-    ]
-  },
-  "can you show me monthly sales trends": {
-    text: "Here are the monthly sales trends for the current year:",
-    sql: "SELECT \n  YEAR(order_date) as year,\n  MONTH(order_date) as month,\n  SUM(order_total) as monthly_revenue\nFROM orders\nGROUP BY YEAR(order_date), MONTH(order_date)\nORDER BY year, month;",
-    results: {
-      headers: ["Month", "Revenue"],
-      rows: [
-        ["January", "$89,240"],
-        ["February", "$92,150"],
-        ["March", "$105,430"],
-        ["April", "$88,760"],
-        ["May", "$95,420"],
-        ["June", "$102,350"],
-        ["July", "$97,860"],
-        ["August", "$104,540"],
-        ["September", "$99,870"],
-        ["October", "$112,430"],
-        ["November", "$108,760"],
-        ["December", "$125,890"],
-      ],
-    },
-    chartData: [
-      { name: 'Jan', revenue: 89240 },
-      { name: 'Feb', revenue: 92150 },
-      { name: 'Mar', revenue: 105430 },
-      { name: 'Apr', revenue: 88760 },
-      { name: 'May', revenue: 95420 },
-      { name: 'Jun', revenue: 102350 },
-      { name: 'Jul', revenue: 97860 },
-      { name: 'Aug', revenue: 104540 },
-      { name: 'Sep', revenue: 99870 },
-      { name: 'Oct', revenue: 112430 },
-      { name: 'Nov', revenue: 108760 },
-      { name: 'Dec', revenue: 125890 },
-    ]
-  },
-  "what are the product categories by sales": {
-    text: "Here's the breakdown of sales by product category:",
-    sql: "SELECT category_name, SUM(sales_amount) as total_sales\nFROM products p\nJOIN sales s ON p.product_id = s.product_id\nGROUP BY category_name\nORDER BY total_sales DESC;",
-    results: {
-      headers: ["Category", "Sales"],
-      rows: [
-        ["Electronics", "$245,670"],
-        ["Clothing", "$189,340"],
-        ["Home & Garden", "$156,780"],
-        ["Sports", "$98,450"],
-        ["Books", "$67,890"],
-      ],
-    },
-    chartData: [
-      { name: 'Electronics', value: 245670 },
-      { name: 'Clothing', value: 189340 },
-      { name: 'Home & Garden', value: 156780 },
-      { name: 'Sports', value: 98450 },
-      { name: 'Books', value: 67890 },
-    ]
-  }
-};
-
 const COLORS = ['#5D3FD3', '#6d4fe4', '#7d5ff5', '#8d6ff6', '#9d7ff7'];
 
 function getToken() {
@@ -152,10 +80,7 @@ function getSelectedDbStorageKey() {
   return token ? `selectedDb_${token}` : "selectedDb";
 }
 
-function getSessionID() {
-  const sessionsdata = JSON.parse(localStorage.getItem(process.env.REACT_APP_SESSIONID_KEY)) || []
-  return sessionsdata;
-}
+const SelectChartStyle = () => `font-medium text-gray-700 bg-white border border-gray-300 w-[90%] text-sm h-9 px-3 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent transition-all duration-200`
 
 // Loading animation component
 const LoadingDots = () => (
@@ -195,6 +120,551 @@ const ThinkingAnimation = () => (
   </div>
 );
 
+// Enhanced loading animation for chart images
+const ChartLoadingAnimation = () => (
+  <div className="w-full h-64 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200 flex flex-col items-center justify-center relative overflow-hidden">
+    {/* Animated background */}
+    <motion.div 
+      className="absolute inset-0 bg-gradient-to-r from-transparent via-[#5D3FD3]/10 to-transparent"
+      animate={{
+        x: ['-100%', '100%'],
+      }}
+      transition={{
+        duration: 1.5,
+        repeat: Infinity,
+        ease: "easeInOut"
+      }}
+    />
+    
+    {/* Main spinner */}
+    <motion.div
+      className="relative z-10 flex flex-col items-center justify-center"
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3 }}
+    >
+      <motion.div
+        className="w-16 h-16 border-4 border-[#5D3FD3]/20 rounded-full mb-4 relative"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+      >
+        <div className="absolute top-0 left-0 w-16 h-16 border-4 border-transparent border-t-[#5D3FD3] rounded-full" />
+      </motion.div>
+      
+      {/* Progress dots */}
+      <div className="flex space-x-2 mb-4">
+        {[0, 1, 2].map((i) => (
+          <motion.div
+            key={i}
+            className="w-2 h-2 bg-[#5D3FD3] rounded-full"
+            animate={{
+              scale: [1, 1.5, 1],
+              opacity: [0.3, 1, 0.3],
+            }}
+            transition={{
+              duration: 1.2,
+              repeat: Infinity,
+              delay: i * 0.2,
+            }}
+          />
+        ))}
+      </div>
+      
+      {/* Loading text with progress */}
+      <motion.div
+        className="text-sm text-gray-600 font-medium"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.2 }}
+      >
+        Generating Visualization
+      </motion.div>
+      <motion.div
+        className="text-xs text-gray-500 mt-1"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.4 }}
+      >
+        This may take a few seconds...
+      </motion.div>
+    </motion.div>
+  </div>
+);
+
+// Professional Voice Search Component
+const VoiceSearchButton = ({ onTranscript, disabled }) => {
+  const {
+    transcript,
+    listening,
+    browserSupportsSpeechRecognition,
+    isMicrophoneAvailable,
+    resetTranscript
+  } = useSpeechRecognition();
+
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    if (transcript) {
+      onTranscript(transcript);
+      resetTranscript();
+    }
+  }, [transcript, onTranscript, resetTranscript]);
+
+  useEffect(() => {
+    if (!browserSupportsSpeechRecognition || !isMicrophoneAvailable) {
+      setHasError(true);
+    }
+  }, [browserSupportsSpeechRecognition, isMicrophoneAvailable]);
+
+  const handleToggleListening = () => {
+    if (listening) {
+      SpeechRecognition.stopListening();
+    } else {
+      setHasError(false);
+      SpeechRecognition.startListening({ 
+        continuous: true,
+        language: 'en-US'
+      }).catch((error) => {
+        console.error('Speech recognition error:', error);
+        setHasError(true);
+      });
+    }
+  };
+
+  if (!browserSupportsSpeechRecognition) {
+    return (
+      <button
+        disabled
+        className="p-2 text-gray-400 cursor-not-allowed"
+        title="Speech recognition not supported in this browser"
+      >
+        <FiMicOff size={18} />
+      </button>
+    );
+  }
+
+  if (!isMicrophoneAvailable) {
+    return (
+      <button
+        disabled
+        className="p-2 text-gray-400 cursor-not-allowed"
+        title="Microphone not available"
+      >
+        <FiMicOff size={18} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <motion.button
+        onClick={handleToggleListening}
+        disabled={disabled || hasError}
+        className={`p-2 rounded-full transition-all duration-300 ${
+          listening 
+            ? 'text-white bg-[#5D3FD3] border border-[#5D3FD3] shadow-lg' 
+            : hasError
+            ? 'text-gray-400 bg-gray-50 border border-gray-200 cursor-not-allowed'
+            : 'text-[#5D3FD3] bg-white border border-gray-300 hover:bg-[#5D3FD3] hover:text-white hover:border-[#5D3FD3]'
+        }`}
+        whileHover={!disabled && !hasError ? { scale: 1.05 } : {}}
+        whileTap={!disabled && !hasError ? { scale: 0.95 } : {}}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        title={hasError ? "Microphone access denied" : listening ? "Stop listening" : "Start voice search"}
+      >
+        <motion.div
+          animate={listening ? { 
+            scale: [1, 1.2, 1],
+          } : {}}
+          transition={listening ? {
+            duration: 1.5,
+            repeat: Infinity,
+            ease: "easeInOut"
+          } : {}}
+        >
+          {listening ? (
+            <div className="relative">
+              <FiMic size={18} />
+              <motion.div
+                className="absolute -top-1 -right-1 w-2 h-2 bg-white rounded-full"
+                animate={{ opacity: [0, 1, 0] }}
+                transition={{ duration: 1, repeat: Infinity }}
+              />
+            </div>
+          ) : (
+            <FiMic size={18} />
+          )}
+        </motion.div>
+      </motion.button>
+
+      {/* Listening Animation */}
+      <AnimatePresence>
+        {listening && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-[#5D3FD3] text-white text-xs px-3 py-2 rounded-lg shadow-lg whitespace-nowrap z-50"
+          >
+            <div className="flex items-center space-x-2">
+              <div className="flex space-x-1">
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="w-1 h-4 bg-white rounded-full"
+                    animate={{
+                      height: [4, 12, 4],
+                    }}
+                    transition={{
+                      duration: 0.8,
+                      repeat: Infinity,
+                      delay: i * 0.2,
+                    }}
+                  />
+                ))}
+              </div>
+              <span>Listening... Speak now</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Tooltip */}
+      <AnimatePresence>
+        {showTooltip && !listening && !hasError && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 5 }}
+            className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-[#5D3FD3] text-white text-xs px-2 py-1 rounded whitespace-nowrap z-50"
+          >
+            Voice search
+            <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-[#5D3FD3] rotate-45"></div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// Professional Image Gallery Modal Component
+const ImageGalleryModal = ({ isOpen, onClose, images, startIndex }) => {
+  const [currentIndex, setCurrentIndex] = useState(startIndex);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showThumbnails, setShowThumbnails] = useState(true);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [rotation, setRotation] = useState(0);
+
+  useEffect(() => {
+    setCurrentIndex(startIndex);
+    setImageLoaded(false);
+    setZoomLevel(1);
+    setRotation(0);
+  }, [startIndex, isOpen]);
+
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        } else {
+          onClose();
+        }
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'ArrowLeft') {
+        handlePrevious();
+      } else if (e.key === 'ArrowRight') {
+        handleNext();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape);
+      document.addEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'hidden';
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen, onClose, isFullscreen]);
+
+  const handlePrevious = () => {
+    setCurrentIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+    setImageLoaded(false);
+    setZoomLevel(1);
+    setRotation(0);
+  };
+
+  const handleNext = () => {
+    setCurrentIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
+    setImageLoaded(false);
+    setZoomLevel(1);
+    setRotation(0);
+  };
+
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen);
+  };
+
+  const toggleThumbnails = () => {
+    setShowThumbnails(!showThumbnails);
+  };
+
+  const handleZoomIn = () => {
+    setZoomLevel(prev => Math.min(prev + 0.25, 3));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel(prev => Math.max(prev - 0.25, 0.5));
+  };
+
+  const handleZoomReset = () => {
+    setZoomLevel(1);
+  };
+
+  const handleRotateRight = () => {
+    setRotation(prev => (prev + 90) % 360);
+  };
+
+  const handleRotateLeft = () => {
+    setRotation(prev => (prev - 90) % 360);
+  };
+
+  const handleDownload = () => {
+    const link = document.createElement('a');
+    link.href = images[currentIndex];
+    link.download = `quantchat-chart-${currentIndex + 1}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImageLoad = () => {
+    setImageLoaded(true);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <motion.div
+      className={`fixed inset-0 z-50 flex items-center justify-center ${
+        isFullscreen ? 'bg-black' : 'bg-black/90 backdrop-blur-sm'
+      }`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      {/* Header Controls */}
+      <div className="absolute top-0 left-0 right-0 z-40 flex items-center justify-between p-6 bg-gradient-to-b from-black/80 to-transparent">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={onClose}
+            className="flex items-center space-x-2 text-white hover:text-gray-300 transition-colors duration-200 p-2 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-sm"
+          >
+            <FiX size={20} />
+            <span className="text-sm font-medium">Close</span>
+          </button>
+          
+          <div className="flex items-center space-x-1 bg-black/50 rounded-lg p-1 backdrop-blur-sm">
+            <span className="text-white text-sm font-medium px-2">
+              {currentIndex + 1} / {images.length}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={toggleThumbnails}
+            className="p-3 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-sm"
+            title={showThumbnails ? "Hide thumbnails" : "Show thumbnails"}
+          >
+            <FiGrid size={18} />
+          </button>
+          
+          <button
+            onClick={toggleFullscreen}
+            className="p-3 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg bg-black/50 hover:bg-black/70 backdrop-blur-sm"
+            title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          >
+            {isFullscreen ? <FiMinimize size={18} /> : <FiMaximize size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Image Container */}
+      <div className="relative w-full h-full flex items-center justify-center p-4">
+        {/* Navigation Arrows */}
+        {images.length > 1 && (
+          <>
+            <button
+              onClick={handlePrevious}
+              className="absolute left-6 z-30 p-4 text-white hover:text-[#5D3FD3] transition-all duration-200 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transform hover:scale-110"
+              style={{ left: '2rem' }}
+            >
+              <FiChevronLeft size={24} />
+            </button>
+            
+            <button
+              onClick={handleNext}
+              className="absolute right-6 z-30 p-4 text-white hover:text-[#5D3FD3] transition-all duration-200 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm transform hover:scale-110"
+              style={{ right: '2rem' }}
+            >
+              <FiChevronRight size={24} />
+            </button>
+          </>
+        )}
+
+        {/* Image Display */}
+        <div className="relative max-w-5xl max-h-[80vh] flex items-center justify-center">
+          {!imageLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 border-4 border-[#5D3FD3]/20 border-t-[#5D3FD3] rounded-full animate-spin" />
+            </div>
+          )}
+          
+          <motion.div
+            className={`relative ${imageLoaded ? 'block' : 'invisible'}`}
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.3 }}
+          >
+            <img
+              src={images[currentIndex]}
+              alt={`Generated chart visualization ${currentIndex + 1}`}
+              className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-2xl"
+              style={{
+                transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
+                transition: 'transform 0.3s ease'
+              }}
+              onLoad={handleImageLoad}
+            />
+            
+            {/* Image Overlay Info */}
+            <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2">
+              <span className="text-white text-sm font-medium">
+                Chart {currentIndex + 1} of {images.length}
+              </span>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+
+      {/* Bottom Controls */}
+      <div className="absolute bottom-0 left-0 right-0 z-40 p-6 bg-gradient-to-t from-black/80 to-transparent">
+        <div className="flex items-center justify-between">
+          {/* Thumbnail Strip */}
+          {showThumbnails && images.length > 1 && (
+            <div className="flex-1 flex items-center justify-center space-x-2 max-w-2xl mx-auto">
+              {images.map((image, index) => (
+                <button
+                  key={index}
+                  onClick={() => {
+                    setCurrentIndex(index);
+                    setImageLoaded(false);
+                    setZoomLevel(1);
+                    setRotation(0);
+                  }}
+                  className={`flex-shrink-0 w-16 h-16 rounded-lg border-2 overflow-hidden transition-all duration-200 transform hover:scale-110 ${
+                    index === currentIndex 
+                      ? 'border-[#5D3FD3] scale-110 shadow-lg shadow-[#5D3FD3]/30' 
+                      : 'border-transparent opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <img
+                    src={image}
+                    alt={`Thumbnail ${index + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Toolbar */}
+          <div className="flex items-center space-x-2 bg-black/50 rounded-xl p-2 backdrop-blur-sm">
+            {/* Zoom Controls */}
+            <div className="flex items-center space-x-1 border-r border-gray-600 pr-2">
+              <button
+                onClick={handleZoomOut}
+                disabled={zoomLevel <= 0.5}
+                className="p-2 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
+                title="Zoom Out"
+              >
+                <FiZoomIn className="rotate-180" size={18} />
+              </button>
+              
+              <span className="text-white text-xs font-medium min-w-[45px] text-center">
+                {Math.round(zoomLevel * 100)}%
+              </span>
+              
+              <button
+                onClick={handleZoomIn}
+                disabled={zoomLevel >= 3}
+                className="p-2 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
+                title="Zoom In"
+              >
+                <FiZoomIn size={18} />
+              </button>
+              
+              <button
+                onClick={handleZoomReset}
+                className="p-2 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg"
+                title="Reset Zoom"
+              >
+                <FiRefreshCw size={16} />
+              </button>
+            </div>
+
+            {/* Rotation Controls */}
+            <div className="flex items-center space-x-1 border-r border-gray-600 pr-2">
+              <button
+                onClick={handleRotateLeft}
+                className="p-2 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg"
+                title="Rotate Left"
+              >
+                <FiRotateCw className="rotate-90" size={18} />
+              </button>
+              
+              <button
+                onClick={handleRotateRight}
+                className="p-2 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg"
+                title="Rotate Right"
+              >
+                <FiRotateCw className="-rotate-90" size={18} />
+              </button>
+            </div>
+
+            {/* Download */}
+            <button
+              onClick={handleDownload}
+              className="p-2 text-white hover:text-[#5D3FD3] transition-colors duration-200 rounded-lg"
+              title="Download"
+            >
+              <FiDownload size={18} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Background Overlay Click to Close */}
+      <div 
+        className="absolute inset-0 z-0"
+        onClick={onClose}
+      />
+    </motion.div>
+  );
+};
+
 export default function Chat() {
   const [selectedDb, setSelectedDb] = useState("");
   const [dbStatus, setDbStatus] = useState("");
@@ -207,42 +677,53 @@ export default function Chat() {
   const [dbLoading, setDbLoading] = useState(true);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [checkingDbStatus, setCheckingDbStatus] = useState(false);
-  const [expandedSummaries, setExpandedSummaries] = useState({});
   const [showDBInfo, setShowDBInfo] = useState(false);
   const [selectedDbDetails, setSelectedDbDetails] = useState(null);
   const [schemaData, setSchemaData] = useState(null);
   const [showStatus, setShowStatus] = useState(false);
   const [isBotTyping, setIsBotTyping] = useState(false);
-  const [generatingSummary, setGeneratingSummary] = useState({});
-  const [generatingVisualization, setGeneratingVisualization] = useState({});
-  const [activeVisualizations, setActiveVisualizations] = useState({});
   const [hasShownWelcomeMessage, setHasShownWelcomeMessage] = useState(false);
 
-
   // session id details
-
-  // store the all sessions data here
-  const [sessionID, setSessionID] = useState([]);
-
-  // store the current database sessionid 
+  const { sessionIDData } = useContext(SessionIDContext);
   const [currentSelectedID, setCurrentSelectedID] = useState("");
+  const [chartType, setChartType] = useState(["Bar Chart", "Pie Chart", "Line Chart", "Histogram", "Scatter Plot"]);
+  const [visualizationInputRefs, setVisualizationInputRefs] = useState({});
 
-
-
-
+  // Image gallery state
+  const [galleryModal, setGalleryModal] = useState({
+    isOpen: false,
+    images: [],
+    startIndex: 0
+  });
 
   const getSessionIDWithDBID = (id) => {
-    if (id && sessionID.length) {
-      const findValue = sessionID.filter(val => val.dbid === Number(id));
+    if (id && sessionIDData) {
+      const findValue = sessionIDData.filter(val => val.dbid === Number(id));
       if (findValue.length > 0) {
         setCurrentSelectedID(findValue[0].token);
+      } else {
+        setCurrentSelectedID("");
       }
     }
-  }
+  };
 
+  useEffect(() => {
+    function clearCurrentSessionID() {
+      if (currentSelectedID.length > 0) {
+        const findvalue = sessionIDData.filter((val) => val.token === currentSelectedID);
+        if (findvalue.length === 0) {
+          setCurrentSelectedID("");
+        }
+      }
+    }
+    clearCurrentSessionID();
+  }, [sessionIDData, currentSelectedID]);
 
-
-
+  // Handle voice transcript
+  const handleVoiceTranscript = useCallback((transcript) => {
+    setMessage(prev => prev + (prev ? ' ' : '') + transcript);
+  }, []);
 
   // On mount, restore selectedDb from localStorage/sessionStorage for this user
   useEffect(() => {
@@ -250,7 +731,6 @@ export default function Chat() {
     const storedDb = sessionStorage.getItem(dbKey) || localStorage.getItem(dbKey) || "";
     if (storedDb) {
       setSelectedDb(storedDb);
-
     }
   }, []);
 
@@ -265,7 +745,6 @@ export default function Chat() {
       ]);
       setHasShownWelcomeMessage(true);
     } else if (!selectedDb && hasShownWelcomeMessage) {
-      // Clear chats when database is deselected
       setChats([]);
       setHasShownWelcomeMessage(false);
     }
@@ -358,7 +837,6 @@ export default function Chat() {
       } finally {
         if (isMounted) {
           setDbLoading(false);
-          setSessionID(getSessionID());
           setInitialLoadComplete(true);
         }
       }
@@ -381,10 +859,7 @@ export default function Chat() {
     }
     let token = getToken();
     if (token) {
-      const dbRES = authApi.setSelectedDatabase(selectedDb)
-      // select sessionid 
-      // const responseData =  dbRES
-      // console.log(responseData)
+      authApi.setSelectedDatabase(selectedDb);
     }
   }, [selectedDb, initialLoadComplete]);
 
@@ -412,55 +887,15 @@ export default function Chat() {
     }
   };
 
-  // Simulate bot typing and response
-  const simulateBotResponse = async (userMessage) => {
-    setIsBotTyping(true);
-
-    // Simulate thinking time
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const normalizedMessage = userMessage.toLowerCase().trim();
-    let response = PREDEFINED_RESPONSES[normalizedMessage];
-
-    if (!response) {
-      // Default response for unknown queries
-      response = {
-        text: "I understand you're looking for data insights. While I process your specific query, here's an example of what I can do with your data.",
-        sql: "SELECT * FROM your_data WHERE condition = 'example' LIMIT 5;",
-        results: {
-          headers: ["Example Column", "Sample Data"],
-          rows: [
-            ["Data Point 1", "Value 1"],
-            ["Data Point 2", "Value 2"],
-            ["Data Point 3", "Value 3"],
-          ],
-        },
-        chartData: [
-          { name: 'Sample A', value: 100 },
-          { name: 'Sample B', value: 200 },
-          { name: 'Sample C', value: 150 },
-        ]
-      };
-    }
-
-    setIsBotTyping(false);
-    return response;
-  };
-
-
   const chatBotResponse = async (userMsg, currentSelectedID) => {
     try {
       setIsBotTyping(true);
       const responseSQLBOT = await ChatWithSQL_API(userMsg, currentSelectedID);
-      console.log(responseSQLBOT)
-      
       setIsBotTyping(false);
       return responseSQLBOT;
-
-    }
-    catch (err) {
+    } catch (err) {
       console.log(err.message + 'error on chating with bot!')
-      throw err;
+      return { success: false }
     }
   }
 
@@ -479,14 +914,12 @@ export default function Chat() {
       return;
     }
 
-    // Add user message immediately
     const userMessage = message.trim();
     const newChats = [...chats, { type: "user", text: userMessage }];
     setChats(newChats);
     setMessage("");
 
     if (dbStatus !== "Connected") {
-      // Add status message for disconnected database
       setChats(prev => [...prev, {
         type: "bot",
         text: "Database is currently disconnected. Your message has been queued and will be processed once the connection is restored.",
@@ -495,31 +928,52 @@ export default function Chat() {
       return;
     }
 
-    // Simulate bot response
-    const botResponse = await simulateBotResponse(userMessage);
-
-    // bot response from fastapi
     const botapi_response = await chatBotResponse(userMessage, currentSelectedID);
+    const chatID = Date.now();
 
-    setChats(prev => [...prev, {
-      type: "bot",
-      text: "I understand you're looking for data insights. While I process your specific query, here's an example of what I can do with your data.",
-      sql: botapi_response.sql,
-      results: botapi_response.data,
-      chartData: botResponse.chartData
-    }]);
-
-    // setChats(prev => [...prev, {
-    //   type: "bot",
-    //   text: botResponse.text,
-    //   sql: botResponse.sql,
-    //   results: botResponse.results,
-    //   chartData: botResponse.chartData
-    // }]);
+    if (botapi_response.success) {
+      const filterColumnsTable = botapi_response.data.length > 0 ? Object.keys(botapi_response.data[0]) : []
+      setChats(prev => [...prev, {
+        chatID,
+        summarize: { value: "", isloading: false },
+        type: "bot",
+        text: "I understand you're looking for data insights. While I process your specific query, here's an example of what I can do with your data.",
+        sql: botapi_response.sql,
+        results: botapi_response.data,
+        chartData: {
+          isloading: false,
+          image: "",
+          isVisualForm: false, // Changed to false to hide by default
+          question: "",
+          x_axis: "",
+          y_axis: "",
+          charttype: "",
+          dataColumn: filterColumnsTable
+        },
+        error: { status: false, message: "" }
+      }])
+    } else {
+      setChats(prev => [...prev, {
+        chatID,
+        summarize: { value: "", isloading: false },
+        type: "bot",
+        text: "",
+        sql: "",
+        results: "",
+        chartData: {
+          isloading: false,
+          image: "",
+          isVisualForm: false, // Changed to false to hide by default
+          question: "",
+          x_axis: "",
+          y_axis: "",
+          charttype: "",
+          dataColumn: []
+        },
+        error: { status: true, message: botapi_response.message }
+      }])
+    }
   };
-
-
-
 
   const handleDbSelect = async (e) => {
     const dbId = e.target.value.toString();
@@ -529,7 +983,6 @@ export default function Chat() {
       getSessionIDWithDBID(dbId)
       sessionStorage.setItem(dbKey, dbId);
       localStorage.setItem(dbKey, dbId);
-
     } else {
       sessionStorage.removeItem(dbKey);
       localStorage.removeItem(dbKey);
@@ -567,62 +1020,198 @@ export default function Chat() {
     setMessage("");
   };
 
-  const toggleSummary = async (index) => {
-    if (!expandedSummaries[index]) {
-      setGeneratingSummary(prev => ({ ...prev, [index]: true }));
-      // Simulate summary generation time
-      await new Promise(resolve => setTimeout(resolve, 800));
-      setGeneratingSummary(prev => ({ ...prev, [index]: false }));
-    }
-    setExpandedSummaries(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
-  };
+  const convertNormalText = (summary) => {
+    return summary.includes("**") ? summary.replace(/\*\*/g, " ") : summary;
+  }
 
-  const toggleVisualization = async (index) => {
-    if (!activeVisualizations[index]) {
-      setGeneratingVisualization(prev => ({ ...prev, [index]: true }));
-      // Simulate visualization generation time
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setGeneratingVisualization(prev => ({ ...prev, [index]: false }));
-    }
-    setActiveVisualizations(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
-  };
+  const GenerateSummarize = async (chat, sessionid) => {
+    if (chat.summarize.value) {
+      setChats(chats.map((val) => {
+        if (chat.chatID === val.chatID) {
+          return { ...chat, summarize: { value: "", isloading: false } }
+        }
+        return val
+      }));
+    } else {
+      setChats(chats.map((val) => {
+        if (chat.chatID === val.chatID) {
+          return { ...chat, summarize: { ...chat.summarize, isloading: true } };
+        }
+        return val
+      }));
 
-  const generateSummary = (chat) => {
-    if (!chat.results) return "";
-
-    const headers = chat.results.headers;
-    const rows = chat.results.rows;
-
-    if (headers.includes("Revenue") || headers.some(h => h.toLowerCase().includes("revenue"))) {
-      const revenueIndex = headers.findIndex(h =>
-        h.toLowerCase().includes("revenue") || h.toLowerCase().includes("amount")
-      );
-
-      if (revenueIndex !== -1) {
-        const total = rows.reduce((sum, row) => {
-          const value = parseFloat(row[revenueIndex].replace(/[^0-9.]/g, ''));
-          return sum + (isNaN(value) ? 0 : value);
-        }, 0);
-
-        const maxRow = rows.reduce((max, row) => {
-          const value = parseFloat(row[revenueIndex].replace(/[^0-9.]/g, ''));
-          return value > max.value ? { value, row } : max;
-        }, { value: -Infinity, row: null });
-
-        return `The data shows a total revenue of $${total.toLocaleString()}. 
-        The highest revenue was generated by ${maxRow.row ? maxRow.row[0] : 'N/A'} with $${maxRow.value.toLocaleString()}.`;
+      const respback = await getSummarizeSQL_API(chat.results, sessionid);
+      if (respback.success) {
+        setChats(chats.map((val) => {
+          if (chat.chatID === val.chatID) {
+            return {
+              ...chat,
+              summarize: {
+                value: convertNormalText(respback?.summary),
+                isloading: false
+              }
+            };
+          }
+          return val
+        }));
+      } else {
+        setChats(chats.map((val) => {
+          if (chat.chatID === val.chatID) {
+            return {
+              ...chat,
+              summarize: {
+                value: convertNormalText(respback?.summary),
+                isloading: false
+              }
+            };
+          }
+          return val
+        }));
       }
     }
+  }
 
-    return `This dataset contains ${rows.length} records with ${headers.length} fields. 
-    The data provides insights into ${headers.join(", ")} with comprehensive metrics for analysis.`;
+  const SelectAxishandler = (event, type, chatid) => {
+    if (type === 'x') {
+      setChats(chats.map(val => {
+        if (val.chatID === chatid) {
+          return { ...val, chartData: { ...val.chartData, x_axis: event.target.value } }
+        }
+        return val
+      }))
+    } else {
+      setChats(chats.map(val => {
+        if (val.chatID === chatid) {
+          return { ...val, chartData: { ...val.chartData, y_axis: event.target.value } }
+        }
+        return val
+      }))
+    }
+  }
+
+  const SelectChartType = (event, chatid) => {
+    setChats(chats.map(val => {
+      if (val.chatID === chatid) {
+        return { ...val, chartData: { ...val.chartData, charttype: event.target.value } }
+      }
+      return val;
+    }))
+  }
+
+  const OpenChartFormhandle = (chatid) => {
+    setChats(chats.map((val) => {
+      if (val.type === 'bot' && val.chatID === chatid) {
+        const updatedChat = {
+          ...val,
+          chartData: { ...val.chartData, isVisualForm: !val.chartData.isVisualForm }
+        };
+
+        // Focus on input when opening the form
+        if (updatedChat.chartData.isVisualForm) {
+          setTimeout(() => {
+            const inputElement = document.getElementById(`chart-input-${chatid}`);
+            if (inputElement) {
+              inputElement.focus();
+            }
+          }, 100);
+        }
+
+        return updatedChat;
+      }
+      return val;
+    }))
+  }
+
+  const ChartQuestionQuery = (chatid, event) => {
+    setChats(chats.map((val) => {
+      if (val.chatID === chatid) {
+        return { ...val, chartData: { ...val.chartData, question: event.target.value } }
+      }
+      return val;
+    }))
+  }
+
+  const SetPendingVisual = (chatid, value) => {
+    setChats(chats.map(val => {
+      if (val.chatID === chatid) {
+        return { ...val, chartData: { ...val.chartData, isloading: value } }
+      }
+      return val;
+    }))
+  }
+
+  const handleChartFormSubmit = (chatid) => {
+    SubmitVisualFormhandler(chatid);
+  }
+
+  const handleChartInputKeyDown = (e, chatid) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleChartFormSubmit(chatid);
+    }
+  }
+
+  const SubmitVisualFormhandler = async (chatid) => {
+    try {
+      const findchat = chats.find((val) => val.chatID === chatid);
+      const chatdata = findchat?.chartData
+
+      if (true) {
+        const resdata = {
+          "session_id": currentSelectedID,
+          "data": findchat?.results,
+          "user_question": chatdata.question,
+          "chart_type": chatdata.charttype,
+          "x_axis": chatdata.x_axis,
+          "y_axis": chatdata.y_axis
+        }
+        SetPendingVisual(chatid, true)
+        const responseback = await GetVisualizationSQL_API(resdata);
+        if (responseback.success) {
+          const imageURI = `data:image/png;base64,${responseback.imageURI}`;
+          setChats(chats.map(val => {
+            if (val.chatID === chatid) {
+              return { ...val, chartData: { ...val.chartData, image: imageURI, isloading: false } };
+            }
+            return val;
+          }))
+        } else {
+          SetPendingVisual(chatid, false)
+        }
+      }
+    } catch (err) {
+      console.log(err.message)
+    }
+  }
+
+  // Open image gallery modal
+  const openImageGallery = (chatIndex, image) => {
+    // Collect all chart images from all chats
+    const allChartImages = chats
+      .filter(chat => chat.chartData?.image)
+      .map(chat => chat.chartData.image);
+
+    const currentImageIndex = allChartImages.indexOf(image);
+
+    setGalleryModal({
+      isOpen: true,
+      images: allChartImages,
+      startIndex: currentImageIndex !== -1 ? currentImageIndex : 0
+    });
   };
+
+  // Close image gallery modal
+  const closeImageGallery = () => {
+    setGalleryModal({
+      isOpen: false,
+      images: [],
+      startIndex: 0
+    });
+  };
+
+  const ErrorStyleChat = (errorFlag) => {
+    return errorFlag ? 'bg-red-50 border border-red-100' : ' bg-gray-50 border border-gray-100'
+  }
 
   const renderChart = (chat, index) => {
     if (!chat.chartData) return null;
@@ -687,10 +1276,11 @@ export default function Chat() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.3 }}
             className="max-w-3xl px-4 py-3 rounded-lg shadow-sm text-sm bg-[#5D3FD3] text-white rounded-br-none relative"
+            style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
           >
             <div className="flex items-center justify-between">
-              <div className="flex-1 pr-4">{chat.text}</div>
-              <div className="bg-white p-1 rounded-full flex-shrink-0">
+              <div className="flex-1 pr-4 break-words whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere' }}>{chat.text}</div>
+              <div className="bg-white p-1 rounded-full flex-shrink-0 ml-2">
                 <FiUser className="text-[#5D3FD3]" size={14} />
               </div>
             </div>
@@ -731,6 +1321,7 @@ export default function Chat() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
             className="max-w-3xl px-4 py-3 rounded-lg shadow-sm text-sm bg-yellow-50 border border-yellow-200 rounded-bl-none"
+            style={{ overflowWrap: 'anywhere' }}
           >
             <div className="flex items-center mb-2">
               <div className="bg-yellow-500 p-1 rounded-full mr-2">
@@ -738,7 +1329,7 @@ export default function Chat() {
               </div>
               <span className="text-xs text-yellow-700 font-medium">Database Status</span>
             </div>
-            <div className="mb-3 text-yellow-700">{chat.text}</div>
+            <div className="mb-3 text-yellow-700 break-words whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere' }}>{chat.text}</div>
             <div className="flex items-center mt-2">
               <button
                 onClick={checkDbStatus}
@@ -759,21 +1350,42 @@ export default function Chat() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: "easeOut" }}
-            className="max-w-3xl px-4 py-3 rounded-lg shadow-sm text-sm bg-gray-50 border border-gray-100 rounded-bl-none"
+            className={`max-w-3xl px-4 py-3 rounded-lg shadow-sm text-sm rounded-bl-none ${ErrorStyleChat(chat?.error?.status)}`}
+            style={{ overflowWrap: 'anywhere' }}
           >
             <div className="flex items-center mb-2">
-              <div className="bg-[#5D3FD3] p-1 rounded-full mr-2">
+              <div className={chat.text ? "bg-[#5D3FD3] p-1 rounded-full mr-2" : "bg-red-600 p-1 rounded-full mr-2"}>
                 <FiMessageSquare className="text-white" size={14} />
               </div>
-              <span className="text-xs text-[#5D3FD3] font-medium">QuantChat</span>
+              <span className={chat.text ? "text-xs text-[#5D3FD3] font-medium" : "text-xs text-red-600 font-medium"}>QuantChat</span>
             </div>
 
-            {chat.text && <div className="mb-3 text-gray-700">{chat.text}</div>}
+            {chat.text ?
+              <div className="mb-3 text-gray-700 break-words whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere' }}>{chat.text}</div> :
+
+              chat.error.status && <div>
+                {chat.error.message === 'ISE' && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <LuServerOff className="w-5 h-5 mr-2" /> The server encountered an internal error or misconfiguration and was unable to complete your request
+                </div>}
+
+                {chat.error.message === 'SI' && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <IoTimeOutline className="w-5 h-5 mr-2" /> Your session has expired. Please connect again
+                </div>}
+
+                {chat.error.message === 'SNF' && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <PiLockKeyFill className="w-5 h-5 mr-2" /> This action requires an active session. Please connect again for this action
+                </div>}
+
+                {(chat.error.message !== 'SI' && chat.error.message !== 'ISE' && chat.error.message !== 'SNF') && <div className="my-4 flex items-center text-red-600 text-sm">
+                  <BiSolidMessageAltError className="w-5 h-5 mr-2" /> Something went wrong on our end. Please try again later.
+                </div>}
+              </div>
+            }
 
             {chat.sql && (
               <div className="mb-4">
                 <div className="flex items-center justify-between bg-gray-800 text-gray-100 px-3 py-2 rounded-t-md">
-                  <span className="text-xs font-medium">SQLmessage:"We have some problem to connect the fastapi"</span>
+                  <span className="text-xs font-medium">SQL Query</span>
                   <button
                     onClick={() => copyToClipboard(chat.sql, `sql-${index}`)}
                     className="text-gray-300 hover:text-white transition-colors flex items-center"
@@ -791,7 +1403,7 @@ export default function Chat() {
                     )}
                   </button>
                 </div>
-                <pre className="bg-gray-900 text-gray-100 p-3 rounded-b-md overflow-x-auto text-xs font-mono">
+                <pre className="bg-gray-900 text-gray-100 p-3 rounded-b-md overflow-x-auto text-xs font-mono break-words whitespace-pre-wrap break-all">
                   {chat.sql}
                 </pre>
               </div>
@@ -802,14 +1414,14 @@ export default function Chat() {
                 <div className="text-xs font-medium text-gray-600 mb-2">
                   Query Results ({chat.results.length} rows):
                 </div>
-                <div className="border border-gray-200 rounded-md overflow-hidden shadow-xs mb-3 overflow-x-auto">
+                <div className="border border-gray-300 rounded-lg overflow-hidden shadow-sm mb-3 overflow-x-auto bg-white">
                   <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-100">
+                    <thead className="bg-gray-50">
                       <tr>
                         {Object.keys(chat.results[0]).map((header, i) => (
                           <th
                             key={i}
-                            className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
+                            className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-300 bg-gray-50/80 whitespace-normal break-words"
                           >
                             {header}
                           </th>
@@ -820,12 +1432,13 @@ export default function Chat() {
                       {chat.results.map((row, i) => (
                         <tr
                           key={i}
-                          className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                          className={i % 2 === 0 ? "bg-white hover:bg-gray-50" : "bg-gray-50 hover:bg-gray-100"}
                         >
                           {Object.values(row).map((cell, j) => (
                             <td
                               key={j}
-                              className="px-4 py-2.5 text-sm text-gray-700 whitespace-nowrap"
+                              className="px-4 py-3 text-sm text-gray-700 whitespace-normal border-b border-gray-200 break-words"
+                              style={{ overflowWrap: 'anywhere' }}
                             >
                               {cell}
                             </td>
@@ -839,11 +1452,10 @@ export default function Chat() {
                 {/* Action Buttons */}
                 <div className="flex space-x-3 mt-4">
                   <button
-                    onClick={() => toggleSummary(index)}
-                    disabled={generatingSummary[index]}
+                    onClick={() => GenerateSummarize(chat, currentSelectedID)}
                     className="flex items-center text-xs text-[#5D3FD3] hover:text-[#6d4fe4] font-medium transition-colors disabled:opacity-50"
                   >
-                    {generatingSummary[index] ? (
+                    {chat.summarize.isloading ? (
                       <>
                         <Sparkles className="mr-1 animate-pulse" size={12} />
                         Generating...
@@ -851,33 +1463,25 @@ export default function Chat() {
                     ) : (
                       <>
                         <FiBarChart2 className="mr-1" size={12} />
-                        {expandedSummaries[index] ? 'Hide Summary' : 'Generate Summary'}
+                        {chat.summarize.value ? 'Hide Summary' : 'Generate Summary'}
                       </>
                     )}
                   </button>
 
                   <button
-                    onClick={() => toggleVisualization(index)}
-                    disabled={generatingVisualization[index]}
+                    onClick={() => OpenChartFormhandle(chat.chatID)}
                     className="flex items-center text-xs text-[#5D3FD3] hover:text-[#6d4fe4] font-medium transition-colors disabled:opacity-50"
                   >
-                    {generatingVisualization[index] ? (
-                      <>
-                        <BarChart3 className="mr-1 animate-pulse" size={12} />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <FiPieChart className="mr-1" size={12} />
-                        {activeVisualizations[index] ? 'Hide Visualization' : 'Visualize Data'}
-                      </>
-                    )}
+                    <>
+                      <FiPieChart className="mr-1" size={12} />
+                      {chat.chartData.isVisualForm ? 'Hide Visualization' : 'Visualize Data'}
+                    </>
                   </button>
                 </div>
 
                 {/* Summary Content */}
                 <AnimatePresence>
-                  {expandedSummaries[index] && (
+                  {chat.summarize.value !== "" && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -890,7 +1494,7 @@ export default function Chat() {
                           <Sparkles className="mr-1" size={14} />
                           Data Summary
                         </div>
-                        {generateSummary(chat)}
+                        <div className="break-words whitespace-pre-wrap break-all" style={{ overflowWrap: 'anywhere' }}>{chat.summarize.value}</div>
                       </div>
                     </motion.div>
                   )}
@@ -898,7 +1502,7 @@ export default function Chat() {
 
                 {/* Visualization Content */}
                 <AnimatePresence>
-                  {activeVisualizations[index] && (
+                  {chat.chartData.isVisualForm && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
@@ -906,12 +1510,133 @@ export default function Chat() {
                       transition={{ duration: 0.3 }}
                       className="mt-3 overflow-hidden"
                     >
-                      <div className="bg-green-50 border border-green-100 rounded-md p-3">
-                        <div className="font-medium text-green-700 mb-2 flex items-center">
-                          <PieChartIcon className="mr-1" size={14} />
+                      <div className="bg-gray-50 border border-gray-200 w-full rounded-lg p-4 shadow-xs">
+                        <div className="font-medium text-gray-700 mb-3 flex items-center">
+                          <PieChartIcon className="mr-2" size={16} />
                           Data Visualization
                         </div>
-                        {renderChart(chat, index)}
+                        <div className="data-visual-edit-form my-3 w-full">
+                          <div className="chart-config-select-con w-full flex items-center justify-between gap-3 mb-4">
+                            {/* Chart type select container */}
+                            <div className="select-charttype flex-1">
+                              <select
+                                className="font-medium text-gray-700 bg-white border border-gray-300 w-full text-sm h-10 px-3 rounded-md focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent transition-all duration-200"
+                                onChange={(e) => SelectChartType(e, chat.chatID)}
+                                value={chat.chartData.charttype}
+                              >
+                                <option value="" disabled>Select Chart Type</option>
+                                {chartType.map((opt) => (
+                                  <option key={opt} value={opt} className="font-medium">
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Select option for x_axis */}
+                            <div className="x_axis-con flex-1">
+                              {(chat.chartData.charttype !== "Pie Chart" && chat.chartData.charttype !== "") && (
+                                <select
+                                  className="font-medium text-gray-700 bg-white border border-gray-300 w-full text-sm h-10 px-3 rounded-md focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent transition-all duration-200"
+                                  onChange={(e) => SelectAxishandler(e, 'x', chat.chatID)}
+                                  value={chat.chartData.x_axis}
+                                >
+                                  <option value="" disabled>Select X-axis</option>
+                                  {chat.chartData.dataColumn.map((opt, index) => (
+                                    chat.chartData.y_axis === opt ?
+                                      <option disabled value={opt} key={index}>{opt}</option>
+                                      :
+                                      <option value={opt} key={index}>{opt}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+
+                            {/* Select option for y_axis */}
+                            <div className="y_axis-con flex-1">
+                              {(chat.chartData.charttype !== "Pie Chart" && chat.chartData.charttype !== "") && (
+                                <select
+                                  className="font-medium text-gray-700 bg-white border border-gray-300 w-full text-sm h-10 px-3 rounded-md focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent transition-all duration-200"
+                                  onChange={(e) => SelectAxishandler(e, 'y', chat.chatID)}
+                                  value={chat.chartData.y_axis}
+                                >
+                                  <option value="" disabled>Select Y-axis</option>
+                                  {chat.chartData.dataColumn.map((opt, index) => (
+                                    chat.chartData.x_axis === opt ?
+                                      <option disabled value={opt} key={index}>{opt}</option>
+                                      :
+                                      <option value={opt} key={index}>{opt}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="input-con w-full flex items-center gap-2">
+                            <textarea
+                              id={`chart-input-${chat.chatID}`}
+                              value={chat?.chartData?.question}
+                              onChange={(e) => ChartQuestionQuery(chat.chatID, e)}
+                              onKeyDown={(e) => handleChartInputKeyDown(e, chat.chatID)}
+                              className="flex-1 bg-white min-h-[40px] max-h-32 py-2 rounded-md font-medium text-sm border border-gray-300 px-3 focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent transition-all duration-200 resize-y break-words whitespace-pre-wrap break-all"
+                              placeholder="Describe the chart you want to generate..."
+                              rows={1}
+                              style={{
+                                resize: 'vertical',
+                                minHeight: '40px',
+                                maxHeight: '128px',
+                                overflowWrap: 'anywhere'
+                              }}
+                            />
+                            <button
+                              onClick={() => handleChartFormSubmit(chat.chatID)}
+                              disabled={chat.chartData.isloading}
+                              className="flex items-center justify-center get-chart-btn w-32 bg-[#5D3FD3] hover:bg-[#6d4fe4] h-10 text-sm font-semibold rounded-md text-white transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {chat.chartData.isloading ? (
+                                <AiOutlineLoading3Quarters className="animate-spin w-4 h-4" />
+                              ) : (
+                                'Get Chart'
+                              )}
+                            </button>
+                          </div>
+
+                          {chat.chartData.image !== "" && (
+                            <div className="w-full mt-4">
+                              <div className="font-medium text-gray-700 mb-3 flex items-center">
+                                <BarChart3 className="mr-2" size={16} />
+                                Generated Visualization
+                              </div>
+
+                              {chat.chartData.isloading ? (
+                                <ChartLoadingAnimation />
+                              ) : (
+                                <motion.div
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ duration: 0.4 }}
+                                  className="relative group cursor-pointer"
+                                  onClick={() => openImageGallery(index, chat.chartData.image)}
+                                >
+                                  <LazyLoadImage
+                                    effect="opacity"
+                                    className="w-full rounded-lg border border-gray-200 shadow-sm transition-all duration-300 group-hover:shadow-lg group-hover:scale-[1.02]"
+                                    src={chat.chartData.image}
+                                    alt="Generated chart visualization"
+                                    placeholder={<ChartLoadingAnimation />}
+                                    threshold={100}
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-300 rounded-lg flex items-center justify-center">
+                                    <div className="opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-full shadow-lg flex items-center space-x-2">
+                                      <FiZoomIn className="text-gray-700" size={16} />
+                                      <span className="text-sm font-medium text-gray-700">Click to expand</span>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </motion.div>
                   )}
@@ -944,8 +1669,9 @@ export default function Chat() {
             <select
               value={selectedDb}
               onChange={handleDbSelect}
-              className="bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent rounded px-1 w-48 max-w-[180px] sm:max-w-none"
+              className="bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent rounded px-1 w-48 max-w-[180px] sm:max-w-none truncate"
               disabled={dbLoading}
+              title={databases.find(d => d.id === selectedDb)?.name || "Select Database"}
             >
               <option value="">Select Database</option>
               {databases.map((db) => (
@@ -1028,6 +1754,14 @@ export default function Chat() {
         )}
       </AnimatePresence>
 
+      {/* Image Gallery Modal */}
+      <ImageGalleryModal
+        isOpen={galleryModal.isOpen}
+        onClose={closeImageGallery}
+        images={galleryModal.images}
+        startIndex={galleryModal.startIndex}
+      />
+
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-h-0">
         {/* Chat Messages Area */}
@@ -1073,24 +1807,46 @@ export default function Chat() {
             )}
 
             <div className="flex items-center space-x-2 w-full">
-              <input
-                type="text"
-                placeholder={
-                  !selectedDb
-                    ? "Please select a database to chat."
-                    : editingIndex !== null
-                      ? "Edit your message..."
-                      : "Ask about your data..."
-                }
-                className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent bg-white shadow-xs"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !isBotTyping && handleSend()}
-                disabled={isChatBlocked || isBotTyping}
-              />
+              <div className="flex-1 relative">
+                <textarea
+                  placeholder={
+                    !selectedDb
+                      ? "Please select a database to chat."
+                      : editingIndex !== null
+                        ? "Edit your message..."
+                        : "Ask about your data..."
+                  }
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#5D3FD3] focus:border-transparent bg-white shadow-xs resize-y min-h-[48px] max-h-32 break-words whitespace-pre-wrap break-all pr-12"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !isBotTyping) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  disabled={isChatBlocked || isBotTyping}
+                  rows={1}
+                  style={{
+                    resize: 'vertical',
+                    minHeight: '48px',
+                    maxHeight: '128px',
+                    overflowWrap: 'anywhere'
+                  }}
+                />
+                
+                {/* Voice Search Button */}
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                  <VoiceSearchButton 
+                    onTranscript={handleVoiceTranscript}
+                    disabled={isChatBlocked || isBotTyping}
+                  />
+                </div>
+              </div>
+              
               <motion.button
                 onClick={handleSend}
-                className="p-3 rounded-lg bg-[#5D3FD3] text-white hover:bg-[#6d4fe4] transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                className="p-3 rounded-lg bg-[#5D3FD3] text-white hover:bg-[#6d4fe4] transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shadow-xs flex-shrink-0"
                 disabled={!message.trim() || isChatBlocked || isBotTyping}
                 whileHover={{ scale: !message.trim() || isChatBlocked || isBotTyping ? 1 : 1.05 }}
                 whileTap={{ scale: !message.trim() || isChatBlocked || isBotTyping ? 1 : 0.95 }}
